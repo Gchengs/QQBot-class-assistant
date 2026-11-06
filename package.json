@@ -5,6 +5,14 @@
   "type": "module",
   "description": "QQBot 班级群消息助手：自动从群聊里抽取待办、按人认领、每周推送一次汇总。不依赖大模型也能跑。",
   "main": "src/index.js",
+  "homepage": "https://github.com/Gchengs/QQBot-class-assistant#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Gchengs/QQBot-class-assistant.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Gchengs/QQBot-class-assistant/issues"
+  },
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
