@@ -4,13 +4,14 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { log } from '../logger.js';
 import { today, diffDays } from '../utils/date.js';
+import { migrate, SCHEMA_VERSION } from './schema.js';
 
 const FILE = () => path.join(config.dataDir, 'todos.json');
 
 let cache = null;
 
 function emptyState() {
-  return { version: 1, todos: [] };
+  return { version: SCHEMA_VERSION, todos: [] };
 }
 
 function load() {
@@ -20,13 +21,19 @@ function load() {
     cache = emptyState();
     return cache;
   }
+
+  let parsed;
   try {
-    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-    cache = { version: 1, todos: Array.isArray(parsed.todos) ? parsed.todos : [] };
+    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch (err) {
     log.error(`读取待办库失败，将以空库启动：${err.message}`);
     cache = emptyState();
+    return cache;
   }
+
+  // 版本问题故意不放进上面的 catch：读不懂就启动失败，别让空库把原文件覆盖掉
+  const data = migrate(parsed, file);
+  cache = { version: SCHEMA_VERSION, todos: Array.isArray(data.todos) ? data.todos : [] };
   return cache;
 }
 

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { log } from '../logger.js';
+import { migrate, SCHEMA_VERSION } from './schema.js';
 import { knownGroups, moveGroup } from './todos.js';
 
 /**
@@ -17,7 +18,7 @@ const FILE = () => path.join(config.dataDir, 'groups.json');
 let cache = null;
 
 function emptyState() {
-  return { version: 1, groups: [] };
+  return { version: SCHEMA_VERSION, groups: [] };
 }
 
 function load() {
@@ -27,13 +28,19 @@ function load() {
     cache = emptyState();
     return cache;
   }
+
+  let parsed;
   try {
-    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-    cache = { version: 1, groups: Array.isArray(parsed.groups) ? parsed.groups : [] };
+    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch (err) {
     log.error(`读取群登记簿失败，将以空表启动：${err.message}`);
     cache = emptyState();
+    return cache;
   }
+
+  // 版本比程序新时这里会抛，故意不兜：群登记簿丢了等于所有主动推送都发不出去
+  const data = migrate(parsed, file);
+  cache = { version: SCHEMA_VERSION, groups: Array.isArray(data.groups) ? data.groups : [] };
   return cache;
 }
 

@@ -4,25 +4,36 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { log } from '../logger.js';
 import { CN_WEEKDAY, parseDueDate, parseTime } from '../utils/date.js';
+import { migrate, SCHEMA_VERSION } from './schema.js';
 
 const FILE = () => path.join(config.dataDir, 'courses.json');
 
 let cache = null;
 
+function emptyState() {
+  return { version: SCHEMA_VERSION, courses: [] };
+}
+
 function load() {
   if (cache) return cache;
   const file = FILE();
   if (!fs.existsSync(file)) {
-    cache = { version: 1, courses: [] };
+    cache = emptyState();
     return cache;
   }
+
+  let parsed;
   try {
-    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-    cache = { version: 1, courses: Array.isArray(parsed.courses) ? parsed.courses : [] };
+    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch (err) {
     log.error(`读取课程表失败，将以空表启动：${err.message}`);
-    cache = { version: 1, courses: [] };
+    cache = emptyState();
+    return cache;
   }
+
+  // 版本比程序新时这里会抛，故意不兜：宁可起不来，也别把课程写没
+  const data = migrate(parsed, file);
+  cache = { version: SCHEMA_VERSION, courses: Array.isArray(data.courses) ? data.courses : [] };
   return cache;
 }
 

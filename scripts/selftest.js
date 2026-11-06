@@ -393,5 +393,78 @@ runBackup({ keep: 2 });
 check('超过保留数会清掉旧的', listBackups().length <= 2, true);
 check('至少还留一份', listBackups().length >= 1, true);
 
+console.log('\n[24] 数据结构版本与迁移');
+const { SCHEMA_VERSION, migrate, SchemaTooNewError } = await import('../src/store/schema.js');
+
+const probe = `${process.env.DATA_DIR}/schema-probe.json`;
+const cleanProbe = () => {
+  fs.rmSync(probe, { force: true });
+  fs.rmSync(`${probe}.v1.bak`, { force: true });
+};
+const readProbe = () => JSON.parse(fs.readFileSync(probe, 'utf8'));
+
+check('当前结构版本是 1', SCHEMA_VERSION, 1);
+
+// 写入侧：落盘的文件必须带上当前版本号，否则下次读的时候无从判断
+const diskTodos = JSON.parse(fs.readFileSync(`${process.env.DATA_DIR}/todos.json`, 'utf8'));
+check('落盘文件带当前版本号', diskTodos.version, SCHEMA_VERSION);
+
+// 最早那批文件没有 version 字段，不能因为读不到版本就判死
+cleanProbe();
+fs.writeFileSync(probe, JSON.stringify({ todos: [{ id: 'a' }] }), 'utf8');
+check('缺 version 的老文件按 v1 读', migrate(readProbe(), probe).todos.length, 1);
+check('缺 version 不会产生备份', fs.existsSync(`${probe}.v1.bak`), false);
+
+// 同版本：原样返回，不折腾
+cleanProbe();
+fs.writeFileSync(probe, JSON.stringify({ version: 1, todos: [] }), 'utf8');
+migrate(readProbe(), probe);
+check('同版本不产生备份文件', fs.existsSync(`${probe}.v1.bak`), false);
+
+// 数据比程序新：必须拦住。这里是最容易出人命的一条——
+// 旧代码读新数据会丢掉不认识的字段，一保存原文件就废了
+cleanProbe();
+const newerRaw = JSON.stringify({ version: 2, todos: [{ id: 'keep-me' }] });
+fs.writeFileSync(probe, newerRaw, 'utf8');
+let tooNew = null;
+try {
+  migrate(readProbe(), probe);
+} catch (err) {
+  tooNew = err;
+}
+check('版本比程序新会抛错', tooNew instanceof SchemaTooNewError, true);
+check('抛错时提示更新程序', Boolean(tooNew && tooNew.message.includes('更新程序')), true);
+check('抛错后原文件一个字节没动', fs.readFileSync(probe, 'utf8'), newerRaw);
+
+// 真跑一次迁移：注入一张假的迁移表，验证升级循环和备份
+cleanProbe();
+fs.writeFileSync(probe, JSON.stringify({ version: 1, todos: [{ id: 'a', owner: '老王' }] }), 'utf8');
+const upgraded = migrate(readProbe(), probe, {
+  target: 2,
+  migrations: {
+    1: (d) => ({
+      ...d,
+      todos: d.todos.map(({ owner, ...rest }) => ({ ...rest, assignee: owner || '' })),
+    }),
+  },
+});
+check('迁移把 owner 搬到了 assignee', upgraded.todos[0].assignee, '老王');
+check('迁移后旧字段不在了', 'owner' in upgraded.todos[0], false);
+check('迁移后版本号前进到 2', upgraded.version, 2);
+check('迁移前留了原件备份', fs.existsSync(`${probe}.v1.bak`), true);
+check('备份是升级前的数据', JSON.parse(fs.readFileSync(`${probe}.v1.bak`, 'utf8')).version, 1);
+
+// 只升了版本号却忘了写迁移函数：必须点名报错，不能静默跳过
+cleanProbe();
+fs.writeFileSync(probe, JSON.stringify({ version: 1, todos: [] }), 'utf8');
+let noStep = null;
+try {
+  migrate(readProbe(), probe, { target: 2, migrations: {} });
+} catch (err) {
+  noStep = err;
+}
+check('缺迁移函数会报错', Boolean(noStep && noStep.message.includes('MIGRATIONS')), true);
+cleanProbe();
+
 console.log(`\n结果：${pass} 通过，${fail} 失败\n`);
 process.exit(fail ? 1 : 0);

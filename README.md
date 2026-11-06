@@ -193,10 +193,15 @@ src/
 │   ├── remind.js       到期提醒（默认关闭，吃配额）
 │   └── course.js       课表提醒（默认关闭）
 ├── store/              JSON 落盘：待办、群、课程、推送状态
+│   ├── todos.js        待办库
+│   ├── courses.js      课表
+│   ├── groups.js       群登记簿
+│   ├── pushstate.js    推送记录（可丢，不参与版本迁移）
+│   └── schema.js       数据结构版本与迁移
 └── utils/date.js       日期解析的全部脏活
 
 scripts/
-├── selftest.js         104 项自检，不需要任何 QQ 凭证
+├── selftest.js         118 项自检，不需要任何 QQ 凭证
 ├── check-syntax.js     全量语法检查，跨平台（不依赖 bash）
 └── check-secrets.js    脱敏体检：openid / IP / 密钥 / 邮箱
 ```
@@ -217,7 +222,7 @@ npm run cli -- todo drop <关键词>       # 作废（不用管了）
 npm run cli -- backup                  # 数据快照
 
 npm run check                          # 语法检查
-npm test                               # 自检 104 项，不需要 QQ 凭证
+npm test                               # 自检 118 项，不需要 QQ 凭证
 npm run secrets                        # 扫一遍有没有把真实数据带进仓库
 ```
 
@@ -238,7 +243,7 @@ npm run secrets                        # 扫一遍有没有把真实数据带进
 `test` 作业在 Node 18 / 20 / 22 上各跑一遍：
 
 1. `npm run check` —— 全部 .js 过一遍 `node --check`
-2. `npm test` —— 104 项自检，覆盖日期解析（中文数字、区间、区间首尾、相对时间的基准）、抽取规则（闲聊挡掉、职务识别、标题清洗）、同周去重、退场计数、渲染截断
+2. `npm test` —— 118 项自检，覆盖日期解析（中文数字、区间、区间首尾、相对时间的基准）、抽取规则（闲聊挡掉、职务识别、标题清洗）、同周去重、退场计数、渲染截断
 3. `npm test` 再跑一遍 —— 自检脚本会往 `data/_selftest` 写临时数据，如果它没打扫干净，第二次就会读到残留而变红。这一步专门盯这个回归。
 
 `secrets` 作业是本仓库特有的：它脱胎于一个真实班级群的部署实例，一旦有人把 `data/todos.json` 或 `.env` 提交上来，泄露的是整群的人和聊天原文。
@@ -282,11 +287,14 @@ CI 里没有自动建 Release 的步骤，这是有意的：「这次改了什�
 
 最后一条最容易漏。待办库是纯 JSON 落盘，**用户手里有数据**，字段改名或删字段不是「就改了几行代码」的事。
 
-> **动数据结构之前先看这条。** `data/*.json` 里有个 `version: 1` 字段，但代码目前**只写不读**——`load()` 里直接把它覆盖成 1，没有任何迁移逻辑。真改了字段名，老数据不会报错，只会让那一批待办的负责人、日期读成空值，静默出错比崩溃更难查。所以：
+> **改了数据结构要动两处，缺一个都不行。** `data/*.json` 里的 `version` 现在是真读的：加载时按 `src/store/schema.js` 的 `MIGRATIONS` 逐级升上来。要让 v1 变 v2：
 >
-> 1. 改之前让用户先 `npm run cli -- backup` 留一份快照
-> 2. 补一个按 `version` 分支的迁移函数，把 `version` 从「装饰品」变成真的开关
-> 3. 这两件事做完才算 `major`，只改代码不算
+> 1. `SCHEMA_VERSION` 改成 `2`
+> 2. 在 `MIGRATIONS` 里补一步 `1: (data) => 升到 v2 后的 data`
+>
+> 只改 1 不改 2，加载时会直接报错点名 `MIGRATIONS`，不会静默跳过。升级前程序会先把原件拷成 `todos.json.v1.bak`，迁移函数写错了从这儿捞。
+>
+> 反过来也挡住了：**数据比程序新时直接拒绝启动**。旧代码读新数据会丢掉不认识的字段，一保存原文件就废了，所以宁可报错。`push-state.json` 不参与这套，它是可丢弃的发送记录。
 
 ---
 
@@ -343,6 +351,8 @@ ssh root@你的服务器IP 'rm -rf /tmp/upd && mkdir -p /tmp/upd \
 | 某条待办推两次就消失 | 它没有截止日，推够次数自动退场，改 `PENDING_SHOW_LIMIT` / `ONGOING_SHOW_LIMIT` |
 | 回复报 11255 | `QQ_GROUP_OPENIDS` 填成了群号（清空即可，会自动登记） |
 | 消息带链接发不出 | 后台需预配置消息 URL 白名单 |
+| 启动报「数据版本是 v2，当前程序只认到 v1」 | 用旧代码读新数据。升级程序；确实要降级，先把 `data/todos.json` 挪走 |
+| 升级后多出 `todos.json.v1.bak` | 正常，那是迁移前的原件，确认数据没问题就能删 |
 
 ---
 
