@@ -26,6 +26,13 @@ echo.
 :loop
 echo [%date% %time%] 启动
 node src/index.js
+rem 退出码 78 = 数据版本比程序新，重启多少次都没用，只会刷屏
+if errorlevel 78 (
+  echo.
+  echo 数据版本与当前程序不匹配，已停止。请更新程序后再启动，data 目录没有被改动。
+  pause
+  exit /b 78
+)
 echo.
 echo 机器人已退出（退出码 %errorlevel%），5 秒后自动重启……
 timeout /t 5 /nobreak >nul

@@ -61,6 +61,26 @@ find "$APP_DIR/src" -name '*.js' -print0 | xargs -0 -n1 "$NODE_BIN" --check || {
   exit 1
 }
 
+echo "==> 检查 systemd unit 是否需要补新指令"
+UNIT="/etc/systemd/system/${SERVICE}.service"
+if [ -f "$UNIT" ]; then
+  if grep -q '^RestartPreventExitStatus=' "$UNIT"; then
+    echo "   已经是新的"
+  else
+    # 老版本 install.sh 装的 unit 没有这一条。缺了它，数据版本不兼容时
+    # 进程会以退出码 78 结束，然后被 Restart=always 每 5 秒拉起一次，日志刷屏。
+    if grep -q '^RestartSec=' "$UNIT"; then
+      sed -i '/^RestartSec=/a RestartPreventExitStatus=78' "$UNIT"
+    else
+      printf '\nRestartPreventExitStatus=78\n' >> "$UNIT"
+    fi
+    systemctl daemon-reload
+    echo "   + RestartPreventExitStatus=78（数据版本不兼容时不再无限重启）"
+  fi
+else
+  echo "   没找到 $UNIT，跳过"
+fi
+
 echo "==> 重启服务"
 systemctl restart "$SERVICE"
 sleep 3

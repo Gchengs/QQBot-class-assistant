@@ -8,8 +8,10 @@ import { pushDigest, pushWeekly } from './features/digest.js';
 import { pushReminder } from './features/remind.js';
 import { scanCourses } from './features/course.js';
 import { runBackup } from './features/backup.js';
-import { closeExpiredNoDue, autoCloseOverdue } from './store/todos.js';
+import { closeExpiredNoDue, autoCloseOverdue, knownGroups } from './store/todos.js';
+import { listCourses } from './store/courses.js';
 import { llmEnabled } from './llm.js';
+import { SchemaTooNewError } from './store/schema.js';
 import {
   rememberGroup,
   resolveTargets,
@@ -18,6 +20,37 @@ import {
 } from './store/groups.js';
 
 assertConfig();
+
+/**
+ * 数据文件版本比程序新时，这里就要退出。
+ *
+ * 三个 store 都是懒加载，启动后第一处触发 load() 的是下面的 runAutoClose()，
+ * 而它外面套着 try/catch，会把版本错误当成「自动销项失败」记一行日志然后继续跑。
+ * 带着读不懂的数据继续跑，下一次 save() 就可能把用户的数据覆盖掉。
+ * 所以启动时主动把三个文件读一遍，让错误在最干净的时候暴露出来。
+ */
+function assertDataReadable() {
+  listGroups();
+  listCourses();
+  knownGroups();
+}
+
+/**
+ * 退出码 78 = 配置/数据不兼容，systemd 的 RestartPreventExitStatus 认这个码，
+ * 看到就不重启了。否则 Restart=always 会每 5 秒重拉一次，日志刷屏还查不到重点。
+ */
+const EXIT_SCHEMA_TOO_NEW = 78;
+
+try {
+  assertDataReadable();
+} catch (err) {
+  if (err instanceof SchemaTooNewError) {
+    log.error(err.message);
+    log.error(`已停止启动（退出码 ${EXIT_SCHEMA_TOO_NEW}），数据文件没有被改动。`);
+    process.exit(EXIT_SCHEMA_TOO_NEW);
+  }
+  throw err;
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

@@ -466,5 +466,40 @@ try {
 check('缺迁移函数会报错', Boolean(noStep && noStep.message.includes('MIGRATIONS')), true);
 cleanProbe();
 
+console.log('\n[25] 数据版本不兼容时以退出码 78 停止');
+const { spawnSync } = await import('node:child_process');
+
+const badDir = `${process.env.DATA_DIR}/_badver`;
+fs.mkdirSync(badDir, { recursive: true });
+fs.writeFileSync(
+  `${badDir}/todos.json`,
+  JSON.stringify({ version: 99, todos: [{ id: 'x', title: '救命数据' }] }),
+  'utf8'
+);
+
+// 真把进程拉起来跑一次。systemd 的 RestartPreventExitStatus 只认退出码，
+// 光测 migrate() 证明不了这个码真的从 process.exit 传了出来。
+const badRun = spawnSync(process.execPath, ['src/index.js'], {
+  encoding: 'utf8',
+  timeout: 20000,
+  env: {
+    ...process.env,
+    DATA_DIR: badDir,
+    QQ_APP_ID: 'selftest',
+    QQ_APP_SECRET: 'selftest',
+    LOG_LEVEL: 'error',
+  },
+});
+
+check('退出码是 78（systemd 据此不重启）', badRun.status, 78);
+check('报错说明数据版本不兼容', (badRun.stderr || '').includes('数据版本'), true);
+check('没走到连 QQ 那一步', (badRun.stderr || '').includes('机器人已上线'), false);
+check(
+  '原数据文件没被改动',
+  JSON.parse(fs.readFileSync(`${badDir}/todos.json`, 'utf8')).todos.length,
+  1
+);
+fs.rmSync(badDir, { recursive: true, force: true });
+
 console.log(`\n结果：${pass} 通过，${fail} 失败\n`);
 process.exit(fail ? 1 : 0);

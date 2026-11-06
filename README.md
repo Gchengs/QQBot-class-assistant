@@ -201,7 +201,7 @@ src/
 └── utils/date.js       日期解析的全部脏活
 
 scripts/
-├── selftest.js         118 项自检，不需要任何 QQ 凭证
+├── selftest.js         122 项自检，不需要任何 QQ 凭证
 ├── check-syntax.js     全量语法检查，跨平台（不依赖 bash）
 └── check-secrets.js    脱敏体检：openid / IP / 密钥 / 邮箱
 ```
@@ -222,7 +222,7 @@ npm run cli -- todo drop <关键词>       # 作废（不用管了）
 npm run cli -- backup                  # 数据快照
 
 npm run check                          # 语法检查
-npm test                               # 自检 118 项，不需要 QQ 凭证
+npm test                               # 自检 122 项，不需要 QQ 凭证
 npm run secrets                        # 扫一遍有没有把真实数据带进仓库
 ```
 
@@ -243,7 +243,7 @@ npm run secrets                        # 扫一遍有没有把真实数据带进
 `test` 作业在 Node 18 / 20 / 22 上各跑一遍：
 
 1. `npm run check` —— 全部 .js 过一遍 `node --check`
-2. `npm test` —— 118 项自检，覆盖日期解析（中文数字、区间、区间首尾、相对时间的基准）、抽取规则（闲聊挡掉、职务识别、标题清洗）、同周去重、退场计数、渲染截断
+2. `npm test` —— 122 项自检，覆盖日期解析（中文数字、区间、区间首尾、相对时间的基准）、抽取规则（闲聊挡掉、职务识别、标题清洗）、同周去重、退场计数、渲染截断
 3. `npm test` 再跑一遍 —— 自检脚本会往 `data/_selftest` 写临时数据，如果它没打扫干净，第二次就会读到残留而变红。这一步专门盯这个回归。
 
 `secrets` 作业是本仓库特有的：它脱胎于一个真实班级群的部署实例，一旦有人把 `data/todos.json` 或 `.env` 提交上来，泄露的是整群的人和聊天原文。
@@ -294,7 +294,7 @@ CI 里没有自动建 Release 的步骤，这是有意的：「这次改了什�
 >
 > 只改 1 不改 2，加载时会直接报错点名 `MIGRATIONS`，不会静默跳过。升级前程序会先把原件拷成 `todos.json.v1.bak`，迁移函数写错了从这儿捞。
 >
-> 反过来也挡住了：**数据比程序新时直接拒绝启动**。旧代码读新数据会丢掉不认识的字段，一保存原文件就废了，所以宁可报错。`push-state.json` 不参与这套，它是可丢弃的发送记录。
+> 反过来也挡住了：**数据比程序新时直接拒绝启动**。旧代码读新数据会丢掉不认识的字段，一保存原文件就废了，所以宁可报错。此时进程以**退出码 78** 结束——`deploy` 里的 unit 配了 `RestartPreventExitStatus=78`，systemd 看到这个码就不重启，不会每 5 秒刷一次日志；Windows 的 `启动机器人.bat` 也认这个码，会停下等你升级。`push-state.json` 不参与这套，它是可丢弃的发送记录。
 
 ---
 
@@ -310,6 +310,8 @@ ssh root@你的服务器IP 'bash /tmp/install.sh'
 ```
 
 `install.sh` 会装 Node、建 `qqbot` 用户、装成 systemd 服务并设开机自启。
+
+服务配的是 `Restart=always`：网络抖动、QQ 网关断开都会自动拉起。但数据版本不兼容时进程以**退出码 78** 结束，unit 里的 `RestartPreventExitStatus=78` 会让 systemd 放弃重启——这种情况重试没有意义，得人去升级程序。`update.sh` 会检查这条指令在不在，缺了自动补上。
 
 之后更新代码：
 
@@ -351,7 +353,7 @@ ssh root@你的服务器IP 'rm -rf /tmp/upd && mkdir -p /tmp/upd \
 | 某条待办推两次就消失 | 它没有截止日，推够次数自动退场，改 `PENDING_SHOW_LIMIT` / `ONGOING_SHOW_LIMIT` |
 | 回复报 11255 | `QQ_GROUP_OPENIDS` 填成了群号（清空即可，会自动登记） |
 | 消息带链接发不出 | 后台需预配置消息 URL 白名单 |
-| 启动报「数据版本是 v2，当前程序只认到 v1」 | 用旧代码读新数据。升级程序；确实要降级，先把 `data/todos.json` 挪走 |
+| 启动报「数据版本是 v2，当前程序只认到 v1」，退出码 78 | 用旧代码读新数据。升级程序；确实要降级，先把 `data/todos.json` 挪走 |
 | 升级后多出 `todos.json.v1.bak` | 正常，那是迁移前的原件，确认数据没问题就能删 |
 
 ---

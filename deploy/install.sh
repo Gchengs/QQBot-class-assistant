@@ -102,6 +102,9 @@ ExecStart=${NODE_BIN} src/index.js
 # 挂了自动拉起：网络抖动、QQ 网关断开都靠这个兜住
 Restart=always
 RestartSec=5
+# 退出码 78 = 数据版本比程序新。这种情况重试一万次也没用，重启只会刷日志，
+# 所以拦住它，让人去升级程序（程序里对应 EXIT_SCHEMA_TOO_NEW）。
+RestartPreventExitStatus=78
 
 # 日志进 journald，用 journalctl -u qqbot-class-assistant -f 看
 StandardOutput=journal
