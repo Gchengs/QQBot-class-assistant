@@ -250,6 +250,46 @@ npm run secrets                        # 扫一遍有没有把真实数据带进
 
 ---
 
+## 发版
+
+版本号只有一个来源：`package.json` 的 `version`。tag 和 Release 都跟着它走，**别手写 `git tag`**，否则三者迟早对不上。
+
+```bash
+git status --short                            # 有未提交改动时 npm version 会直接失败
+npm run check && npm test && npm run secrets  # CI 会在远端再跑一遍，本地先过更省事
+npm version patch                             # 1.0.0 → 1.0.1
+git push --follow-tags
+```
+
+`npm version` 一次做三件事：改 `package.json`、提交一次、打一个 **annotated** tag。两个细节容易搞混：
+
+- **tag 名带 `v`（`v1.0.1`），提交信息不带（`1.0.1`）**，这是 npm 的默认行为，不是笔误
+- 推的时候必须用 `--follow-tags`，它只推 annotated tag——`npm version` 打的正好是这种；而手动 `git tag v1.0.1` 打出来的是轻量标签，`--follow-tags` 推不上去，得用 `git push --tags`
+
+工作区不干净时它会直接拒绝（`npm error Git working directory not clean.`），所以第 1 步不是可选的。
+
+推完去建 Release：**Releases → Draft a new release → 选刚推上去的 `vX.Y.Z` → 写说明 → Publish**。
+
+CI 里没有自动建 Release 的步骤，这是有意的：「这次改了什么、为什么」没法交给脚本写。
+
+### 三种版本号怎么选
+
+| 改了什么 | 版本 |
+| --- | --- |
+| 修 bug、改文案、调默认配置 | `patch` |
+| 新增群指令、新增 `.env` 配置项、新增抽取规则 | `minor` |
+| 改了 `data/` 下 JSON 的字段结构 | `major` |
+
+最后一条最容易漏。待办库是纯 JSON 落盘，**用户手里有数据**，字段改名或删字段不是「就改了几行代码」的事。
+
+> **动数据结构之前先看这条。** `data/*.json` 里有个 `version: 1` 字段，但代码目前**只写不读**——`load()` 里直接把它覆盖成 1，没有任何迁移逻辑。真改了字段名，老数据不会报错，只会让那一批待办的负责人、日期读成空值，静默出错比崩溃更难查。所以：
+>
+> 1. 改之前让用户先 `npm run cli -- backup` 留一份快照
+> 2. 补一个按 `version` 分支的迁移函数，把 `version` 从「装饰品」变成真的开关
+> 3. 这两件事做完才算 `major`，只改代码不算
+
+---
+
 ## 部署到服务器
 
 WebSocket 模式下进程必须常驻。树莓派、旧笔记本、云服务器都行。
