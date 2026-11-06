@@ -1,0 +1,33 @@
+{
+  "name": "qqbot-class-assistant",
+  "version": "1.0.0",
+  "private": false,
+  "type": "module",
+  "description": "QQBot 班级群消息助手：自动从群聊里抽取待办、按人认领、每周推送一次汇总。不依赖大模型也能跑。",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "cli": "node src/cli.js",
+    "test": "node scripts/selftest.js",
+    "check": "node scripts/check-syntax.js",
+    "secrets": "node scripts/check-secrets.js",
+    "pack": "bash scripts/pack.sh"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "node-cron": "^3.0.3",
+    "ws": "^8.18.0"
+  },
+  "license": "MIT",
+  "keywords": [
+    "qq-bot",
+    "qqbot",
+    "todo",
+    "group-chat",
+    "node-cron",
+    "websocket"
+  ]
+}

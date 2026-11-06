@@ -1,0 +1,34 @@
+[Unit]
+Description=QQ Group Todo Bot
+Documentation=file:///opt/qqbot-class-assistant/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=qqbot
+WorkingDirectory=/opt/qqbot-class-assistant
+ExecStart=/usr/bin/node src/index.js
+
+# 挂了自动拉起：网络抖动、QQ 网关断开都靠这个兜住
+Restart=always
+RestartSec=5
+
+# 日志进 journald，用 journalctl -u qqbot-class-assistant -f 看
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=qqbot-class-assistant
+
+# 时区固定成东八区，否则 cron 会按 UTC 跑，18:00 会变成凌晨 2:00
+Environment=TZ=Asia/Shanghai
+Environment=NODE_ENV=production
+
+# 基本加固：机器人只往外连，不需要写系统目录
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/qqbot-class-assistant/data
+
+[Install]
+WantedBy=multi-user.target

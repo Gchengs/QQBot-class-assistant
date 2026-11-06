@@ -1,0 +1,76 @@
+name: CI
+
+# 这个项目没有任何外部依赖型的测试服务，全部自检跑在本地，
+# 所以 CI 只做三件不需要任何凭证就能做的事：
+#   1. 语法能不能过
+#   2. 自检用例能不能过（104 项，含时间解析、抽取、去重、渲染）
+#   3. 有没有人把真实群 openid / IP / 密钥带进仓库
+# 第 3 条是本仓库特有的：它脱胎于一个真实班级群的部署实例，
+# 一旦有人把 data/todos.json 或 .env 提交上来，泄露的是整群的人和聊天原文。
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: 自检 (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 下限取 package.json 里 engines 声明的 18，上限取当前 LTS
+        node: ['18', '20', '22']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 语法检查
+        run: npm run check
+
+      - name: 自检用例
+        run: npm test
+
+      # 自检脚本会往 data/_selftest 写临时数据。如果它没打扫干净，
+      # 第二次跑就会读到上一次的残留而变红。这条用来盯住这个回归。
+      - name: 自检可重复运行
+        run: npm test
+
+  secrets:
+    name: 脱敏检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 扫描疑似敏感信息
+        run: node scripts/check-secrets.js
+
+      # 双保险：如果 .env 或真实 data/*.json 被 commit 进来，git 层面直接拦下
+      - name: 确认敏感文件未被跟踪
+        run: |
+          git ls-files -- '.env' 'data/*.json' '*.tar.gz' \
+            | grep -vE 'data/(\.gitkeep|[^/]*\.example\.json)$' > /tmp/tracked || true
+          if [ -s /tmp/tracked ]; then
+            while IFS= read -r f; do
+              echo "::error file=$f::敏感文件被提交进仓库：$f"
+            done < /tmp/tracked
+            exit 1
+          fi
+          echo "✓ 没有敏感文件被 git 跟踪"
