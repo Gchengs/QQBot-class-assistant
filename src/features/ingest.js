@@ -6,6 +6,7 @@ import { llmEnabled } from '../llm.js';
 import { cleanContent, handleAtMessage } from './atReply.js';
 import { getSelfOpenid } from '../qq/api.js';
 import { parseBaseDate } from '../utils/date.js';
+import { archiveMessage } from '../store/messages.js';
 
 /**
  * 处理群内普通消息（全量模式）。
@@ -61,8 +62,18 @@ export async function ingestMessage(d) {
   // 没有这行日志，「群主到底把权限开没开」「消息进没进来」完全看不出来——
   // 之前排查半天，就是因为收不到消息时服务端一声不响。
   // 不想在日志里留聊天内容，把 LOG_GROUP_MESSAGES 设成 false 即可。
+  const who = author.username || author.id || '未知';
+  // 原文落盘（默认保留 7 天）再抽取。
+  // 顺序很重要：先存档再判断，这样即使抽取崩了、规则改了，
+  // 事后还能把当天的真实语料拿出来重放一遍看效果。
   if (config.logGroupMessages) {
-    const who = author.username || author.id || '未知';
+    archiveMessage({
+      group,
+      msgId: d.id,
+      author: who,
+      content,
+      at: parseBaseDate(d.timestamp) || new Date(),
+    });
     const brief = content.replace(/\s+/g, ' ').slice(0, 40);
     log.info(
       `收到群消息〔${who}〕${brief}${content.length > 40 ? '…' : ''}（${content.length} 字）`
@@ -113,6 +124,7 @@ export async function ingestMessage(d) {
     // 之前这里是大模型不可用就直接 return null，等于「全量模式」形同虚设，
     // 群里聊得再热闹也一条都进不来，而且不打任何日志。
     let inferred = null;
+    const diagnose = {};
     if (llmEnabled()) {
       inferred = await inferTodo(content, {
         mentions: d.mentions || [],
@@ -120,9 +132,16 @@ export async function ingestMessage(d) {
         base,
       });
     } else if (config.ruleExtract) {
-      inferred = inferTodoByRules(content, { mentions: d.mentions || [], base });
+      inferred = inferTodoByRules(content, { mentions: d.mentions || [], base, diagnose });
     }
-    if (!inferred) return;
+    if (!inferred) {
+      // 以前这里直接 return，日志里什么都不留。
+      // 结果就是「群里明明发了通知，库里却一条没有」，而且没法复盘是规则挡的、
+      // 还是消息压根没进来。现在把丢弃原因写出来，规则才好一条条对症去调。
+      const brief = content.replace(/\s+/g, ' ').slice(0, 30);
+      log.warn(`未入库〔${who}〕${brief}… 原因：${diagnose.reason || '未知'}`);
+      return;
+    }
 
     const { todo, duplicated } = addTodo({
       group,

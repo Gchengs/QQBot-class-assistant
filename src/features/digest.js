@@ -155,6 +155,7 @@ export async function pushWeekly(group, { force = false } = {}) {
       inProgress.length +
       thisWeek.length +
       nextWeek.length +
+      later.length +
       pending.length +
       ongoing.length,
   };

@@ -8,6 +8,7 @@ import { pushDigest, pushWeekly } from './features/digest.js';
 import { pushReminder } from './features/remind.js';
 import { scanCourses } from './features/course.js';
 import { runBackup } from './features/backup.js';
+import { pruneOld as pruneMessageArchive } from './store/messages.js';
 import { closeExpiredNoDue, autoCloseOverdue, knownGroups } from './store/todos.js';
 import { listCourses } from './store/courses.js';
 import { llmEnabled } from './llm.js';
@@ -51,6 +52,12 @@ try {
   }
   throw err;
 }
+
+// 群消息原文存档只保留最近 7 天，启动时清一次过期的。
+// 不用定时任务：多一个 timer 就多一个会悄悄停掉的东西，而这件事每天最多差一天。
+// 放在数据可读性检查之后：数据都读不懂了就先停下，别急着动磁盘上的东西。
+const pruned = pruneMessageArchive();
+if (pruned) log.info(`清理过期消息存档 ${pruned} 个文件`);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -116,7 +123,9 @@ async function runDigest() {
   for (const group of groups) {
     try {
       const result = await pushWeekly(group);
-      log.info(`周报 ${group}: 已发送 ${result.count} 项`);
+      // 跳过时 result 里没有 count，照旧打日志会变成「已发送 undefined 项」。
+      // 跳过原因 pushWeekly 自己已经记过了，这里不再重复一遍。
+      if (result?.sent) log.info(`周报 ${group}: 已发送 ${result.count} 项`);
     } catch (err) {
       log.error(`周报推送失败 ${group}: ${err.message}`);
     }

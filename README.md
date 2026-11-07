@@ -192,7 +192,7 @@ src/
 │   ├── render.js       渲染：周报、清单、分组、截断
 │   ├── remind.js       到期提醒（默认关闭，吃配额）
 │   └── course.js       课表提醒（默认关闭）
-├── store/              JSON 落盘：待办、群、课程、推送状态
+├── store/              JSON 落盘：待办、群、课程、推送状态、群消息存档
 │   ├── todos.js        待办库
 │   ├── courses.js      课表
 │   ├── groups.js       群登记簿
@@ -220,6 +220,8 @@ npm run cli -- weekly <群openid>       # 立刻推一次周报（手动测试�
 npm run cli -- todo import 清单.txt     # 批量导入
 npm run cli -- todo drop <关键词>       # 作废（不用管了）
 npm run cli -- backup                  # 数据快照
+npm run cli -- replay [日期]           # 用存档的真实群消息重放抽取，看规则认不认
+npm run cli -- replay 2026-11-07 --save # 把认出来的直接入库
 
 npm run check                          # 语法检查
 npm test                               # 自检 122 项，不需要 QQ 凭证

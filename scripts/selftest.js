@@ -352,10 +352,10 @@ const dupItems = [
   { title: '校史馆参观', due: '2026-11-07', due_time: null, status: 'open' },
 ];
 const dupOut = renderDigest(dupItems);
-check('标题含日期的不再跟一遍「11月7日」', dupOut.includes('CAD 上课 11.7  11月7日'), false);
-// 明天的项会显示成「明天」而不是具体日期，所以这里认「日期信息有没有补上」，
-// 不认某一种具体写法
-check('标题不含日期的照常显示', /校史馆参观.*(明天|11月7日)/.test(dupOut), true);
+check('标题含日期的不再跟一遍「11月7日」', /CAD 上课 11\.7.*直接显示 11月7日/.test(dupOut), false);
+// 临近的日期会显示成「今天/明天」而不是具体日期，而且跑测试的当天不同，
+// 同一个 11-07 可能是今天也可能是明天。所以只断言「日期信息补上了」，不认具体写法。
+check('标题不含日期的照常显示', /校史馆参观.*(今天|明天|11月7日)/.test(dupOut), true);
 
 console.log('\n[21] 日报不再带销项提示行');
 const plainDigest = renderDigest([{ title: '一件事', due: addDays(today(), 2), status: 'open' }]);

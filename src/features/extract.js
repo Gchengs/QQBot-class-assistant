@@ -101,7 +101,7 @@ export function parseExplicit(content, mentions, base = new Date()) {
  * 待办库里混进噪音，周报每期都会带着，比漏掉更烦人。
  */
 const ACTION_WORDS =
-  /(交(?!流|通|往|易|换|涉|代|付)|提交|上交|报名|填写|填表|填报|填一下|填(?!写|报|充)|发我|发给我|发给|发送|发(?=[\s。，,！!?？]|$)|送给|交给|交到|送到|带给|上传|下载|截图|拍照|投票|答题|作答|完成(?!了|的)|准备|整理|汇总|统计|收齐|核对|申报|注册|查询|组织|举行|占座|参会|参加|签到|打卡|复习|预习|打印|带到|带上|带好|记得带|领取|开会|集合|通知|安排|跟进|对接|检查|自查|抽查|排查|看(?!起来|上去|到|了|见|着))/;
+  /(交(?!流|通|往|易|换|涉|代|付)|提交|上交|报名|填写|填表|填报|填一下|填(?!写|报|充)|发我|发给我|发给|发送|发(?=[\s。，,！!?？]|$)|送给|交给|交到|送到|带给|上传|下载|截图|拍照|投票|答题|作答|完成(?!了|的)|准备|整理|汇总|统计|收齐|核对|申报|注册|查询|组织|举行|占座|参会|参加|签到|打卡|复习|预习|打印|带到|带上|带好|记得带|领取|开会|集合|通知|安排|跟进|对接|检查|自查|抽查|排查|看(?!起来|上去|到|了|见|着)|带队|集合|前往|到场|听课|上课|收看|观看|听讲|举办|开展|开设)/;
 
 /** 有明确时间点的事件。没有动作词，但配上日期就是该被提醒的事 */
 const EVENT_WORDS =
@@ -156,12 +156,61 @@ function splitSentences(text) {
 }
 
 /** 挑第一个带动作词或事件词的句子，作为标题来源。已经完成的事跳过 */
+/** 事件名词：句子里出现这些，说明这句在讲「有件事」，值得当标题 */
+const EVENT_NOUN =
+  /(讲座|报告|考试|活动|会议|比赛|大赛|培训|课程|班会|参观|报名|答辩|汇报|演出|晚会|运动会|体检|申报|填报)/;
+
+/** 剥掉客套与祈使词之后还剩多少实义字，用来判断这是不是一句空话 */
+function bareLen(s) {
+  return s
+    .replace(/[请麻烦务必记得大家各位同学们有意向的按时]/g, '')
+    .replace(/(准时|按时)?参加|谢谢|配合|回复|收到/g, '')
+    .replace(/[\s，,。、！!？?：:；;]/g, '').length;
+}
+
+/**
+ * 给每个句子打分，挑最像「要做的事」的那句当标题。
+ *
+ * 以前是「第一个带动作词的句子就上」，问题很具体：
+ * 「刚刚近七点接保卫处通知……实验室发生爆炸」里「通知」也是动作词，
+ * 结果整条背景叙述被当成待办标题，真正的「请各班班长统计并上报」反而丢了。
+ *
+ * 打分逻辑：
+ *   有动作词        +3
+ *   有祈使词        +2
+ *   有事件名词      +2
+ *   有期限词        +2
+ *   有日期且有动作  +1
+ *   讲缘由的句子    -4   （「为扎实推进……」「据了解……」，说的是为什么，不是要做什么）
+ *   剥完客套没剩字  -4   （「请有意向的同学准时参加」这种，当标题等于没写）
+ */
+function scoreSentence(s) {
+  let score = 0;
+  const hasAction = ACTION_WORDS.test(s);
+  if (hasAction) score += 3;
+  if (IMPERATIVE_WORDS.test(s)) score += 2;
+  if (EVENT_NOUN.test(s)) score += 2;
+  if (DEADLINE_WORDS.test(s)) score += 2;
+  if (hasAction && DATE_LIKE.test(s)) score += 1;
+  if (/^(为|为了|由于|鉴于|据了解|据悉|近日|刚刚|近期|按.{0,6}要求)/.test(s)) score -= 4;
+  if (bareLen(s) < 6) score -= 4;
+  return score;
+}
+
 function pickCoreSentence(sentences) {
+  let best = '';
+  let bestScore = 0;
   for (const s of sentences) {
     if (DONE_PATTERN.test(s)) continue;
-    if (ACTION_WORDS.test(s) || EVENT_WORDS.test(s)) return s;
+    const score = scoreSentence(s);
+    if (score > bestScore) {
+      best = s;
+      bestScore = score;
+    }
   }
-  return sentences[0] || '';
+  // 一句都没过线就退回第一句，至少还能靠后半段的规则兜一层
+  if (!best) return sentences.find((s) => !DONE_PATTERN.test(s)) || '';
+  return best;
 }
 
 /**
@@ -175,6 +224,55 @@ function pickCoreSentence(sentences) {
  */
 const DATE_LIKE =
   /(\d{1,2}\s*月\s*\d{1,2}\s*[日号]?|\d{1,2}\s*[./-]\s*\d{1,2}\s*[日号]|\d{1,2}\s*[日号]|大后天|后天|明天|明日|今晚|明晚|今早|今天|今日|本周[一二三四五六日天]?|下周[一二三四五六日天]?|周[一二三四五六日天]|星期[一二三四五六日天])/;
+
+/**
+ * 在整条消息里挑一个「最可能是截止日」的日期。
+ *
+ * 为什么不能简单取第一个日期：
+ * 「11月2号上海某高校实验室爆炸……请各班班长统计并于11月8日前上报」
+ * 第一个日期是事故时间，属于背景；真正的死线是 11 月 8 日。
+ * 取第一个会把一条死线存成四天前的过去时间——这比不收还糟，
+ * 用户看到的是「明天要上报」，系统里记的却是「已经过了」。
+ *
+ * 优先级：
+ *   1) 紧挨期限词（前面/前/截止/之前/上报）的日期，取最早的一个
+ *   2) 不早于消息发送日的日期，取最早的一个
+ *   3) 全都早于发送日 → 不认，落进「日期待定」，让人自己填
+ */
+const DEADLINE_CUE = /^(前|之前|以前|截止|前完成|前上报|前提交|前交|前发)/;
+const DEADLINE_CUE_BEFORE = /(截止|截至|定于|限|于)$/;
+
+function pickBestDue(text, base) {
+  const t = String(text || '');
+  const baseMid = new Date(base);
+  baseMid.setHours(0, 0, 0, 0);
+  const baseIso = toISODate(baseMid);
+
+  const cands = [];
+  const g = new RegExp(DATE_LIKE.source, 'g');
+  let m;
+  while ((m = g.exec(t))) {
+    const due = parseDueDate(m[0], base);
+    if (!due) continue;
+    const after = t.slice(m.index + m[0].length, m.index + m[0].length + 4);
+    const before = t.slice(Math.max(0, m.index - 3), m.index);
+    cands.push({
+      due,
+      cued: DEADLINE_CUE.test(after) || DEADLINE_CUE_BEFORE.test(before),
+      future: due >= baseIso,
+    });
+  }
+  if (!cands.length) return null;
+
+  const byDate = (a, b) => a.due.localeCompare(b.due);
+  const cued = cands.filter((c) => c.cued).sort(byDate);
+  if (cued.length) return cued[0].due;
+
+  const future = cands.filter((c) => c.future).sort(byDate);
+  if (future.length) return future[0].due;
+
+  return null;
+}
 
 function timeInSameSentence(sentences, due, base = new Date()) {
   if (!due) return null;
@@ -206,7 +304,7 @@ const ROLES = [
   '团支部书记', '助理辅导员', '小寝室长', '学习委员', '纪律委员', '纪检委员',
   '生活委员', '宣传委员', '组织委员', '体育委员', '文艺委员', '心理委员',
   '副班长', '团支书', '班委会', '辅导员', '班主任', '寝室长', '宿舍长', '小组长',
-  '班长', '学委', '宣委', '体委', '文委', '助辅', '导员', '班委', '组长',
+  '班长', '副班', '正班', '学委', '宣委', '体委', '文委', '助辅', '导员', '班委', '组长',
 ];
 
 const ROLE_ALT = ROLES.join('|');
@@ -235,7 +333,7 @@ export function findRoleOwner(text) {
 
 /** 前缀会叠好几层：「请各位来教学楼前…」「麻烦各班纪检委员…」，一次只剥一层，得循环 */
 const LEAD_PREFIX =
-  /^(那个|然后|所以|还有|另外|顺便|对了|大家|各位|同学们|同学|各班|家人们|兄弟们|姐妹们|请|麻烦|记得|别忘了|别忘记|帮忙|帮我|把|的)[，,：:]?\s*/;
+  /^(那个|然后|所以|还有|另外|顺便|对了|(?:今天|今日|明天|明日|后天|大后天|昨天)的|大家|各位|同学们|同学|各班|家人们|兄弟们|姐妹们|请|麻烦|记得|别忘了|别忘记|帮忙|帮我|把|的)[，,：:]?\s*/;
 
 /**
  * 句首的时间状语：「明天高数课之前，」「11月7日晚上七点，」「本周三，」。
@@ -304,11 +402,32 @@ function stripLead(s) {
 }
 
 function cleanRuleTitle(t) {
+  // 课表/活动通知常见的键值格式：「主题：AutoCAD中级2班 时间：11月7日 13:30 地点：教4-305」
+  // 整段当标题会得到一串「主题：… 时间：…」，人话都算不上。
+  // 只留「主题：」后那段，后面的时间地点由 due/due_time 字段负责表达。
+  let base = t
+    .replace(/^(主题|课程|活动|会议)[：:]\s*/, '')
+    .replace(/\s*(时间|地点|对象|主讲|主办)[：:].*$/, '')
+    .trim();
+
+  // 长句只取第一个分句：
+  // 「明天的参观活动由副班张弘毅同学负责带队，请大家到位后及时找到副班和负责的老师，不要走散」
+  // 整段塞进标题就是一条 40 字长条，手机上一行显示不完，前面真正有用的信息也被淹了。
+  // 取第一个有实义的分句（≥6 字），后面的附带要求交给正文存档去查。
+  if (base.length > 30) {
+    const first = base
+      .split(/[，,。；;]/)
+      .map((x) => x.trim())
+      .find((x) => x.length >= 6);
+    if (first) base = first;
+  }
+
   const stripped = stripLeadAndTime(
-    t
+    base
       // 邮箱要在 @mention 之前处理：@\S+ 会把 @163.com 整段当成人名吃掉
       .replace(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi, ' ')
       .replace(/@\S+/g, ' ')
+      // 「明天的/今天的」这类时间修饰由 LEAD_PREFIX 在 stripLeadAndTime 里剥掉
       .replace(/^(大家|各位|同学们|同学)?(早|早上好|上午好|晚上好)[，,]?\s*/, '')
       .replace(/^为[^，,]{0,25}[，,]\s*/, '')
       .replace(/【\s*】/g, ' ')
@@ -334,23 +453,40 @@ function cleanRuleTitle(t) {
     .replace(/[\s，,。、：:；;]+$/g, '');
 }
 
-export function inferTodoByRules(text, { mentions = [], base = new Date() } = {}) {
-  const raw = String(text || '').trim();
-  if (!raw) return null;
-  if (/^[#＃]待办/.test(raw)) return null;
-  if (/^https?:\/\//.test(raw)) return null;
+export function inferTodoByRules(text, { mentions = [], base = new Date(), diagnose } = {}) {
+  // diagnose 是个可选的「黑匣子」：传一个空对象进来，被丢弃时这里会写上原因。
+  // 起因是群里 7 条通知一条都没入库，而日志里只有「收到」没有「为什么没收」，
+  // 我连复盘的材料都没有。抽取失败必须留下理由，否则规则永远没法调。
+  const miss = (reason) => {
+    if (diagnose) diagnose.reason = reason;
+    return null;
+  };
 
-  const t = normalize(raw);
-  if (t.length < 4 || t.length > 500) return null;
-  if (NOISE.test(t)) return null;
+  const raw = String(text || '').trim();
+  if (!raw) return miss('空消息');
+  if (/^[#＃]待办/.test(raw)) return miss('显式指令，不重复抽取');
+
+  // 公众号/新闻转发几乎都以链接开头：「https://mp.weixin… 关于举办…大赛的通知」
+  // 以前只要以 http 开头就整条丢掉，等于把所有转发通知全屏蔽了。
+  // 正确做法是把链接摘掉，看剩下的正文还有没有东西。
+  let body = raw;
+  if (/^\s*https?:\/\//.test(raw)) {
+    body = raw.replace(/https?:\/\/\S+/g, ' ').trim();
+    if (body.length < 6) return miss('只有链接，没有正文');
+  }
+
+  const t = normalize(body);
+  if (t.length < 4) return miss('太短，没有信息量');
+  if (t.length > 500) return miss(`太长（${t.length} 字），超过 500 字上限`);
+  if (NOISE.test(t)) return miss('命中噪声词（闲聊/表情/应答）');
   // 只有短消息才按问句排除；长通知里夹个问号很正常
-  if (t.length <= 60 && /[?？]\s*$/.test(t)) return null;
+  if (t.length <= 60 && /[?？]\s*$/.test(t)) return miss('短问句，不是待办');
 
   const sentences = splitSentences(t);
-  if (!sentences.length) return null;
+  if (!sentences.length) return miss('切不出句子');
 
   const core = pickCoreSentence(sentences);
-  if (!core) return null;
+  if (!core) return miss('找不到像待办的那一句');
 
   // 负责人判定，顺序是硬的，不允许上层覆盖：
   //   1) @ 了谁 → 就归谁（最硬的证据）
@@ -369,8 +505,8 @@ export function inferTodoByRules(text, { mentions = [], base = new Date() } = {}
   // base 用消息本身的发送时间，不能是「现在」——否则「今天下午集合」隔几天补录就全错。
   // 但一句里能自己解析出日期时优先用它：「11月21日期中考试，15号18:30答疑」
   // 两个日期并存，整条消息取第一个会把答疑的截止日算到期中考试那天去。
-  const coreDue = parseDueDate(core, base);
-  const due = coreDue || parseDueDate(t, base);
+  // 整条消息里挑「最像死线」的那个日期，而不是第一个遇到的
+  const due = pickBestDue(t, base) || parseDueDate(core, base);
   // 时刻必须在 due 同一句、且紧贴这个日期，不能拿整句里随便一个时刻顶上
   const dueTime = timeInSameSentence(sentences, due, base);
 
@@ -394,14 +530,19 @@ export function inferTodoByRules(text, { mentions = [], base = new Date() } = {}
     // 祈使句兜底：「请/记得 + 动作」即使没写日期也收，
     // 班级群大量通知都是这个句式，漏掉比多收更麻烦。限长度，避免把长文整段收进来。
     (hasAction && hasImperative && t.length <= 80);
-  if (!recognized) return null;
+  if (!recognized) {
+    return miss(
+      `没有可识别的待办结构（动作词=${hasAction ? '有' : '无'}、日期=${due || '无'}、` +
+        `被指派的人=${assigned ? '有' : '无'}、事件词=${hasEvent ? '有' : '无'}、期限词=${hasDeadline ? '有' : '无'}）`
+    );
+  }
 
   let title = cleanRuleTitle(core);
   // 「请各班纪检委员收齐答题截图」→ 标题里再带一遍职务就是重复
   if (roleOwner && title.startsWith(roleOwner)) {
     title = title.slice(roleOwner.length).replace(/^[\s，,、：:]+/, '');
   }
-  if (!title || title.length < 3) return null;
+  if (!title || title.length < 3) return miss(`清洗后标题过短（${title || '空'}）`);
 
   return {
     title,

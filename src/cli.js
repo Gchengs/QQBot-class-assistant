@@ -75,6 +75,9 @@ function usage() {
   node src/cli.js course test                     立刻跑一次扫描，看有没有命中
   node src/cli.js course ping [群openid]          往群里发一条测试消息，验证能收到
 
+  node src/cli.js replay [日期] [群openid]        用存档的真实群消息重放抽取，看规则认不认
+        --save 把认出来的直接入库（默认只看不写）
+        存档在 data/messages/<日期>.jsonl，只保留最近 7 天
   node src/cli.js backup                          立刻做一份数据快照
   node src/cli.js backup list                     看现有的快照
   node src/cli.js backup restore [文件名]          恢复快照（不填用最新一份），恢复后要重启服务
@@ -365,6 +368,96 @@ async function main() {
       const live = demo.filter((x) => (x.due ? x.due >= t : true));
       console.log(renderWeekly(pickWeeklyBuckets(live, t)).text);
       console.log('');
+      break;
+    }
+    case 'replay': {
+      // 用存档里的真实语料重放抽取，看规则到底认不认。
+      // 存在的理由：规则是「宁可漏不肯错」的，但漏掉的必须能查。
+      // 以前只能拿日志前 40 字去猜，改正则等于蒙；现在有原文就能一条条核对。
+      const flags = args.filter((a) => a.startsWith('--'));
+      const rest = args.filter((a) => !a.startsWith('--'));
+      const save = flags.includes('--save');
+
+      const dayArg = rest.find((a) => /^\d{4}-\d{2}-\d{2}$/.test(a)) || today();
+      const groupArg = rest.find((a) => a !== dayArg) || '';
+
+      const { readMessages } = await import('./store/messages.js');
+      const { inferTodoByRules } = await import('./features/extract.js');
+      const { parseBaseDate } = await import('./utils/date.js');
+
+      let msgs = readMessages(dayArg);
+      if (!msgs.length) {
+        console.log(`${dayArg} 没有消息存档。`);
+        console.log('存档从这次升级之后才开始写；更早的消息平台不提供拉取接口，补不回来。');
+        break;
+      }
+      if (groupArg) msgs = msgs.filter((m) => m.group === groupArg);
+
+      let ok = 0;
+      let saved = 0;
+      const misses = [];
+      for (const m of msgs) {
+        const base = parseBaseDate(m.ts);
+        const diagnose = {};
+        const r = inferTodoByRules(m.content, { mentions: [], base, diagnose });
+        const brief = String(m.content || '')
+          .replace(/\s+/g, ' ')
+          .slice(0, 28);
+        if (r) {
+          ok += 1;
+          console.log(`✓ ${brief}…`);
+          console.log(
+            `   标题：${r.title}\n   负责人：${r.owner || '全体'}${
+              r.ownerInferred ? '（推断）' : ''
+            }   截止：${r.due || (r.timeState === 'ongoing' ? '无期限' : '待定')}${
+              r.dueTime ? ' ' + r.dueTime : ''
+            }`
+          );
+          if (save) {
+            const { todo, duplicated } = addTodo({
+              group: m.group,
+              title: r.title,
+              owner: r.owner,
+              ownerInferred: r.ownerInferred,
+              due: r.due,
+              dueStart: r.dueStart,
+              dueTime: r.dueTime,
+              timeState: r.timeState,
+              sourceMsgId: m.id,
+              sourceText: m.content,
+              source: 'rule',
+            });
+            if (!duplicated) {
+              saved += 1;
+              console.log(`   已入库 #${todo.id}`);
+            } else {
+              console.log('   库里已有同名待办，跳过');
+            }
+          }
+        } else {
+          misses.push({ brief, reason: diagnose.reason || '未知' });
+          console.log(`✗ ${brief}…`);
+          console.log(`   ${diagnose.reason || '未知'}`);
+        }
+      }
+
+      console.log(
+        `\n${dayArg}：共 ${msgs.length} 条，认出 ${ok} 条，未认出 ${misses.length} 条` +
+          (save ? `，新入库 ${saved} 条` : '')
+      );
+      if (misses.length) {
+        // 按原因归类，一眼看出该改哪一块：是噪声太宽、还是动作词太少
+        const byReason = new Map();
+        for (const x of misses) {
+          const key = x.reason.replace(/[（(].*$/, '').trim();
+          byReason.set(key, (byReason.get(key) || 0) + 1);
+        }
+        console.log('\n未认出的原因分布：');
+        for (const [k, v] of [...byReason].sort((a, b) => b[1] - a[1])) {
+          console.log(`  ${v} 条  ${k}`);
+        }
+        console.log('\n要补进去：node src/cli.js replay ' + dayArg + ' --save');
+      }
       break;
     }
     case 'backup': {
