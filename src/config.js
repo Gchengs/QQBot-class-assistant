@@ -43,6 +43,9 @@ function getBool(key, fallback) {
   return ['1', 'true', 'yes', 'on'].includes(String(v).toLowerCase());
 }
 
+// 先单独算出来，因为下面存档开关要拿它当默认值（见 ARCHIVE_GROUP_MESSAGES）
+const logGroupMessages = getBool('LOG_GROUP_MESSAGES', true);
+
 export const config = {
   appId: get('QQ_APP_ID'),
   // 机器人自己的 openid。留空则启动后调 /users/@me 取一次
@@ -67,7 +70,14 @@ export const config = {
   ruleExtract: getBool('RULE_EXTRACT', true),
   // 每收到一条群消息就在日志里留一行（截断 40 字），用于确认全量消息权限到底通没通。
   // 介意日志留聊天内容就设成 false。
-  logGroupMessages: getBool('LOG_GROUP_MESSAGES', true),
+  logGroupMessages,
+  // 群消息原文存档（data/messages/<日期>.jsonl，保留 7 天），供 replay 重放抽取。
+  //
+  // 默认跟随 LOG_GROUP_MESSAGES，不是写死 true，这是刻意的：
+  // 老用户设了 LOG_GROUP_MESSAGES=false（不想在日志里留聊天内容），
+  // 升级后不能突然开始把完整原文写到磁盘上——那正好是他们关掉的意图。
+  // 想单独控制就显式设 ARCHIVE_GROUP_MESSAGES。
+  archiveGroupMessages: getBool('ARCHIVE_GROUP_MESSAGES', logGroupMessages),
   // 没有截止日的待办在推送里出现的次数上限，超了就静默（库里仍保留）。
   // 日期待定（等通知）：默认 3 次；无期限（长期有效）：默认 2 次。
   pendingShowLimit: Number(get('PENDING_SHOW_LIMIT', '3')),

@@ -519,5 +519,63 @@ check(
 );
 fs.rmSync(badDir, { recursive: true, force: true });
 
+console.log('\n[26] 存档开关默认跟随日志开关');
+// 这个「跟随」是升级兼容的全部依据。
+// 旧版存档和日志共用一个 LOG_GROUP_MESSAGES；如果 ARCHIVE_GROUP_MESSAGES 默认写死 true，
+// 那些设了 LOG_GROUP_MESSAGES=false（不想留聊天内容）的人一升级，
+// 就会开始把完整原文写到磁盘——正好是当初关掉的东西。
+// config 在模块加载时就定型了，改 env 重测不了，只能起子进程。
+const cfgProbe = (env) => {
+  const base = { ...process.env };
+  delete base.LOG_GROUP_MESSAGES;
+  delete base.ARCHIVE_GROUP_MESSAGES;
+  const r = spawnSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      "const {config}=await import('./src/config.js');console.log(JSON.stringify({log:config.logGroupMessages,archive:config.archiveGroupMessages}))",
+    ],
+    { encoding: 'utf8', timeout: 20000, env: { ...base, ...env } }
+  );
+  const line = String(r.stdout || '')
+    .trim()
+    .split('\n')
+    .pop();
+  try {
+    return JSON.parse(line);
+  } catch {
+    return null;
+  }
+};
+
+const cfgDefault = cfgProbe({});
+check(
+  '默认：日志开，存档也开',
+  Boolean(cfgDefault && cfgDefault.log === true && cfgDefault.archive === true),
+  true
+);
+
+const cfgOld = cfgProbe({ LOG_GROUP_MESSAGES: 'false' });
+check(
+  '老配置只关日志：存档跟着关（升级后行为不变）',
+  Boolean(cfgOld && cfgOld.log === false && cfgOld.archive === false),
+  true
+);
+
+const cfgSplit = cfgProbe({ LOG_GROUP_MESSAGES: 'false', ARCHIVE_GROUP_MESSAGES: 'true' });
+check(
+  '显式开存档：日志关、存档开',
+  Boolean(cfgSplit && cfgSplit.log === false && cfgSplit.archive === true),
+  true
+);
+
+const cfgOff = cfgProbe({ LOG_GROUP_MESSAGES: 'true', ARCHIVE_GROUP_MESSAGES: 'false' });
+check(
+  '显式关存档：日志开、存档关',
+  Boolean(cfgOff && cfgOff.log === true && cfgOff.archive === false),
+  true
+);
+
 console.log(`\n结果：${pass} 通过，${fail} 失败\n`);
 process.exit(fail ? 1 : 0);

@@ -63,10 +63,15 @@ export async function ingestMessage(d) {
   // 之前排查半天，就是因为收不到消息时服务端一声不响。
   // 不想在日志里留聊天内容，把 LOG_GROUP_MESSAGES 设成 false 即可。
   const who = author.username || author.id || '未知';
-  // 原文落盘（默认保留 7 天）再抽取。
+
+  // 原文落盘（保留 7 天）再抽取。
   // 顺序很重要：先存档再判断，这样即使抽取崩了、规则改了，
   // 事后还能把当天的真实语料拿出来重放一遍看效果。
-  if (config.logGroupMessages) {
+  //
+  // 这件事单独由 ARCHIVE_GROUP_MESSAGES 控制，不再和日志共用一个开关：
+  // 之前两者绑在 LOG_GROUP_MESSAGES 上，关了日志的人连存档也没有，replay 就成了空命令。
+  // 该开关默认跟随 LOG_GROUP_MESSAGES，所以老配置的行为一点没变。
+  if (config.archiveGroupMessages) {
     archiveMessage({
       group,
       msgId: d.id,
@@ -74,6 +79,9 @@ export async function ingestMessage(d) {
       content,
       at: parseBaseDate(d.timestamp) || new Date(),
     });
+  }
+
+  if (config.logGroupMessages) {
     const brief = content.replace(/\s+/g, ' ').slice(0, 40);
     log.info(
       `收到群消息〔${who}〕${brief}${content.length > 40 ? '…' : ''}（${content.length} 字）`

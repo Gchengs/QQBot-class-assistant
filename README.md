@@ -119,6 +119,14 @@ FULL_MESSAGE_MODE=true
 
 没开这个权限，机器人只能收到 @ 它的消息，群里聊什么都进不来。这是平台侧的开关，代码绕不过去。
 
+消息进来后，原文会落到 `data/messages/<日期>.jsonl`（只留最近 7 天），供 `npm run cli -- replay` 拿真实语料重放抽取规则。不想让原文落盘就设：
+
+```ini
+ARCHIVE_GROUP_MESSAGES=false
+```
+
+**不设这一项时它跟随 `LOG_GROUP_MESSAGES`**，也就是日志关了就不存档。这是刻意的：旧版这两件事绑在同一个开关上，如果新增的开关默认 `true`，关了日志的人升级后会突然开始把完整聊天存到磁盘——那正是他们当初关掉的东西。
+
 ---
 
 ## 群里的用法
@@ -201,7 +209,7 @@ src/
 └── utils/date.js       日期解析的全部脏活
 
 scripts/
-├── selftest.js         123 项自检，不需要任何 QQ 凭证
+├── selftest.js         127 项自检，不需要任何 QQ 凭证
 ├── check-syntax.js     全量语法检查，跨平台（不依赖 bash）
 └── check-secrets.js    脱敏体检：openid / IP / 密钥 / 邮箱
 ```
@@ -224,7 +232,7 @@ npm run cli -- replay [日期]           # 用存档的真实群消息重放抽�
 npm run cli -- replay 2026-11-07 --save # 把认出来的直接入库
 
 npm run check                          # 语法检查
-npm test                               # 自检 123 项，不需要 QQ 凭证
+npm test                               # 自检 127 项，不需要 QQ 凭证
 npm run secrets                        # 扫一遍有没有把真实数据带进仓库
 ```
 
@@ -245,13 +253,13 @@ npm run secrets                        # 扫一遍有没有把真实数据带进
 `test` 作业在 Node 18 / 20 / 22 上各跑一遍：
 
 1. `npm run check` —— 全部 .js 过一遍 `node --check`
-2. `npm test` —— 123 项自检，覆盖日期解析（中文数字、区间、区间首尾、相对时间的基准）、抽取规则（闲聊挡掉、职务识别、标题清洗）、同周去重、退场计数、渲染截断
+2. `npm test` —— 127 项自检，覆盖日期解析（中文数字、区间、区间首尾、相对时间的基准）、抽取规则（闲聊挡掉、职务识别、标题清洗）、同周去重、退场计数、渲染截断
 3. `npm test` 再跑一遍 —— 自检脚本会往 `data/_selftest` 写临时数据，如果它没打扫干净，第二次就会读到残留而变红。这一步专门盯这个回归。
 
 `secrets` 作业是本仓库特有的：它脱胎于一个真实班级群的部署实例，一旦有人把 `data/todos.json` 或 `.env` 提交上来，泄露的是整群的人和聊天原文。
 
 1. `scripts/check-secrets.js` 扫内容：32 位大写十六进制（群/用户 openid）、16 位以上长数字（用户 id）、非本机 IP、`sk-`/`ghp_`/私钥头，命中即失败；邮箱和主机名只报警告（文档举例需要人工判断）
-2. `git ls-files` 查跟踪：`.env`、`data/*.json`（`*.example.json` 除外）、`*.tar.gz` 一旦被提交，直接用 `::error` 标在出问题的文件上
+2. `git ls-files` 查跟踪：`.env`、`data/*.json`（`*.example.json` 除外）、`*.tar.gz`、`data/messages/*`、`*.jsonl` 一旦被提交，直接用 `::error` 标在出问题的文件上。最后两项是群消息存档，里面是完整聊天原文——`.gitignore` 只拦得住普通 `git add`，`-f` 强推得靠这道兜底
 
 本地提交前想跑同一套：`npm run check && npm test && npm run secrets`。
 
