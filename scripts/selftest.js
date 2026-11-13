@@ -347,15 +347,33 @@ check('恢复后重新出现在清单里', listActive(ag).map((x) => x.title).in
 check('恢复后截止日顺延到今天', back[0].due, today());
 
 console.log('\n[20] 标题自带日期时不重复展示');
+// 两个坑，都是这组用例踩过的：
+// 1. 日期不能写死。写死成 '2026-11-07'，那天一过 activeOnly() 就把它滤掉，
+//    renderDigest 返回 null，整组用例静默失效。
+// 2. 必须用「三天后」而不是「明天」。flatDue() 里 delta===1 会先返回「明天」，
+//    压根走不到 titleHasDate() 那个分支，用明天测这条等于没测。
+const dupDue = addDays(today(), 3);
+const [, dupM, dupD] = dupDue.split('-').map(Number);
 const dupItems = [
-  { title: 'CAD 上课 11.7', due: '2026-11-07', due_time: null, status: 'open' },
-  { title: '校史馆参观', due: '2026-11-07', due_time: null, status: 'open' },
+  { title: `CAD 上课 ${dupM}.${dupD}`, due: dupDue, due_time: null, status: 'open' },
+  { title: '校史馆参观', due: dupDue, due_time: null, status: 'open' },
 ];
 const dupOut = renderDigest(dupItems);
-check('标题含日期的不再跟一遍「11月7日」', /CAD 上课 11\.7.*直接显示 11月7日/.test(dupOut), false);
-// 临近的日期会显示成「今天/明天」而不是具体日期，而且跑测试的当天不同，
-// 同一个 11-07 可能是今天也可能是明天。所以只断言「日期信息补上了」，不认具体写法。
-check('标题不含日期的照常显示', /校史馆参观.*(今天|明天|11月7日)/.test(dupOut), true);
+// 先确认渲染真的有内容，否则下面两条断言即使逻辑错了也可能「通过」
+check('渲染结果非空', typeof dupOut === 'string' && dupOut.length > 0, true);
+const dupLine = (title) =>
+  String(dupOut || '')
+    .split('\n')
+    .find((l) => l.includes(title)) || '';
+// 标题里已经写了「11.16」，这一行就不该再出现「11月16日」。
+// 断到具体日期而不是「任意 X月X日」，否则万一别处冒出别的日期会误判。
+check(
+  '标题含日期的不再跟一遍日期',
+  dupLine('CAD 上课').includes(`${dupM}月${dupD}日`),
+  false
+);
+// 标题没写日期的，要照常补上具体日期
+check('标题不含日期的照常显示', dupLine('校史馆参观').includes(`${dupM}月${dupD}日`), true);
 
 console.log('\n[21] 日报不再带销项提示行');
 const plainDigest = renderDigest([{ title: '一件事', due: addDays(today(), 2), status: 'open' }]);

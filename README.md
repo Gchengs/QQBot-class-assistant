@@ -201,7 +201,7 @@ src/
 └── utils/date.js       日期解析的全部脏活
 
 scripts/
-├── selftest.js         122 项自检，不需要任何 QQ 凭证
+├── selftest.js         123 项自检，不需要任何 QQ 凭证
 ├── check-syntax.js     全量语法检查，跨平台（不依赖 bash）
 └── check-secrets.js    脱敏体检：openid / IP / 密钥 / 邮箱
 ```
@@ -224,7 +224,7 @@ npm run cli -- replay [日期]           # 用存档的真实群消息重放抽�
 npm run cli -- replay 2026-11-07 --save # 把认出来的直接入库
 
 npm run check                          # 语法检查
-npm test                               # 自检 122 项，不需要 QQ 凭证
+npm test                               # 自检 123 项，不需要 QQ 凭证
 npm run secrets                        # 扫一遍有没有把真实数据带进仓库
 ```
 
@@ -245,7 +245,7 @@ npm run secrets                        # 扫一遍有没有把真实数据带进
 `test` 作业在 Node 18 / 20 / 22 上各跑一遍：
 
 1. `npm run check` —— 全部 .js 过一遍 `node --check`
-2. `npm test` —— 122 项自检，覆盖日期解析（中文数字、区间、区间首尾、相对时间的基准）、抽取规则（闲聊挡掉、职务识别、标题清洗）、同周去重、退场计数、渲染截断
+2. `npm test` —— 123 项自检，覆盖日期解析（中文数字、区间、区间首尾、相对时间的基准）、抽取规则（闲聊挡掉、职务识别、标题清洗）、同周去重、退场计数、渲染截断
 3. `npm test` 再跑一遍 —— 自检脚本会往 `data/_selftest` 写临时数据，如果它没打扫干净，第二次就会读到残留而变红。这一步专门盯这个回归。
 
 `secrets` 作业是本仓库特有的：它脱胎于一个真实班级群的部署实例，一旦有人把 `data/todos.json` 或 `.env` 提交上来，泄露的是整群的人和聊天原文。
